@@ -151,20 +151,6 @@ services:
    pip install torch --extra-index-url https://download.pytorch.org/whl/cu117
    ```
 
-## Ethical Considerations
-
-- **Content Filtering**: Three-tier moderation system
-- **User Control**: Manual override points in every chapter
-- **Attribution Tracking**: Bloom filter-based plagiarism detection
-- **Bias Mitigation**: Cultural sensitivity classifiers
-
-## Contributing
-
-We welcome contributions! Please see our [Contribution Guidelines](CONTRIBUTING.md) for details.
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
