@@ -1,0 +1,837 @@
+--- /Users/danielkliewer/ITB02/requirements.txt ---
+fastapi
+uvicorn
+ollama
+chromadb
+langchain
+pydantic
+pillow
+requests
+react
+python-multipart
+celery
+redis
+langchain-community
+langchain-ollama
+textstat
+transformers
+
+
+--- /Users/danielkliewer/ITB02/combined_output.txt ---
+
+
+--- /Users/danielkliewer/ITB02/Dockerfile ---
+# Dockerfile for backend
+FROM python:3.11-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy backend code
+COPY backend/ ./backend
+COPY utils.py .
+
+
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    APP_ENV=production \
+    OLLAMA_HOST=http://ollama:11434
+
+# Expose port
+EXPOSE 8000
+
+# Start command
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+--- /Users/danielkliewer/ITB02/.dockerignore ---
+
+
+--- /Users/danielkliewer/ITB02/combine_files.py ---
+import os
+
+def combine_files_in_directory(output_file="combined_output.txt", ignore_dirs=None):
+    """
+    Combines all files in the current directory (recursively) into a single output file.
+    The file names are recorded before their contents.
+    Directories in `ignore_dirs` will be skipped.
+    """
+    if ignore_dirs is None:
+        ignore_dirs = ["venv"]  # Default to ignoring 'venv'
+
+    with open(output_file, "w", encoding="utf-8") as outfile:
+        for root, dirs, files in os.walk(os.getcwd()):
+            # Modify the dirs list in-place to skip ignored directories
+            dirs[:] = [d for d in dirs if d not in ignore_dirs]
+            
+            for file in files:
+                file_path = os.path.join(root, file)
+                try:
+                    with open(file_path, "r", encoding="utf-8") as infile:
+                        # Write the file name and a separator
+                        outfile.write(f"--- {file_path} ---\n")
+                        # Write the file content
+                        outfile.write(infile.read())
+                        outfile.write("\n\n")
+                except Exception as e:
+                    # Log an error if a file couldn't be read
+                    outfile.write(f"--- {file_path} (ERROR: {e}) ---\n\n")
+
+if __name__ == "__main__":
+    combine_files_in_directory()
+
+--- /Users/danielkliewer/ITB02/utils.py ---
+# utils.py
+import re
+from typing import List
+
+def extract_keywords(text: str) -> List[str]:
+    """
+    Extract key words from text using simple techniques
+    """
+    # Remove punctuation and convert to lowercase
+    text = re.sub(r'[^\w\s]', '', text.lower())
+    
+    # Split into words and remove common stop words
+    stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at'}
+    words = [word for word in text.split() if word not in stop_words]
+    
+    # Return top 5 most frequent words
+    word_freq = {}
+    for word in words:
+        word_freq[word] = word_freq.get(word, 0) + 1
+    
+    return sorted(word_freq, key=word_freq.get, reverse=True)[:5]
+
+--- /Users/danielkliewer/ITB02/.env ---
+
+APP_ENV=development
+DEBUG=False
+
+BACKEND_HOST=0.0.0.0
+BACKEND_PORT=8000
+
+OLLAMA_MODEL=gemma2:27b
+OLLAMA_HOST=http://localhost:11434
+
+REDIS_HOST=redis
+REDIS_PORT=6379
+
+CELERY_BROKER_URL=redis://redis:6379/0
+CELERY_RESULT_BACKEND=redis://redis:6379/0
+
+CHROMA_DB_PATH=/app/data/chroma_db
+UPLOAD_DIR=/app/uploads
+
+--- /Users/danielkliewer/ITB02/.gitattributes ---
+# Auto detect text files and perform LF normalization
+* text=auto
+
+
+--- /Users/danielkliewer/ITB02/docker-compose.yml ---
+version: '3.8'
+
+services:
+  backend:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      ollama:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  redis:
+    image: redis:alpine
+    volumes:
+      - redis_data:/data
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+
+  ollama:
+    image: ollama/ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    command: >
+      sh -c "ollama pull gemma2:27b && 
+             ollama pull deepseek-llm:70b && 
+             ollama serve"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app_network
+
+  frontend:
+    build: 
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - app_network
+
+networks:
+  app_network:
+    driver: bridge
+
+volumes:
+  ollama_data:
+  redis_data:
+  upload_data:
+
+--- /Users/danielkliewer/ITB02/image.jpg ---
+--- /Users/danielkliewer/ITB02/image.jpg (ERROR: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte) ---
+
+--- /Users/danielkliewer/ITB02/frontend/Dockerfile ---
+# Frontend Dockerfile
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Install dependencies
+COPY frontend/package*.json ./
+RUN npm install
+
+# Copy frontend source
+COPY frontend/ ./frontend/
+# Build the application
+RUN npm run build
+
+# Expose port
+EXPOSE 3000
+
+# Start command
+CMD ["npm", "start"]
+
+--- /Users/danielkliewer/ITB02/frontend/src/stores/useStore.js ---
+// frontend/src/stores/useStore.js
+import create from 'zustand';
+
+export const useStore = create((set) => ({
+  nodes: [],
+  edges: [],
+  addNode: (node) => set((state) => ({ nodes: [...state.nodes, node] })),
+  addEdge: (edge) => set((state) => ({ edges: [...state.edges, edge] })),
+  setStory: (story) => {
+    const nodes = story.map((chapter, index) => ({
+      id: `chapter-${index}`,
+      type: 'default',
+      data: { label: `Chapter ${index + 1}` },
+      position: { x: index * 250, y: 0 }
+    }));
+    
+    const edges = nodes.slice(0, -1).map((node, index) => ({
+      id: `edge-${index}`,
+      source: node.id,
+      target: nodes[index + 1].id
+    }));
+
+    set({ nodes, edges });
+  }
+}));
+
+--- /Users/danielkliewer/ITB02/frontend/src/components/StoryEditor.jsx ---
+// story_editor.jsx
+import ReactFlow, { Controls } from 'reactflow';
+import { useStore } from './store';
+
+export default function NarrativeGraph() {
+  const nodes = useStore(state => state.nodes);
+  const edges = useStore(state => state.edges);
+
+  return (
+    <ReactFlow 
+      nodes={nodes}
+      edges={edges}
+      fitView
+    >
+      <Controls />
+    </ReactFlow>
+  );
+}
+
+
+--- /Users/danielkliewer/ITB02/frontend/src/components/NarrativeGraph.jsx ---
+
+
+--- /Users/danielkliewer/ITB02/backend/Dockerfile ---
+# Updated Dockerfile for backend
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy backend code
+COPY backend/ ./backend
+COPY utils.py .
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    APP_ENV=production \
+    OLLAMA_HOST=http://localhost:11434 \
+    PYTHONPATH="${PYTHONPATH}:/app/backend" \
+    PYTHONPATH="${PYTHONPATH}:/app"
+
+EXPOSE 8000
+
+ENV PYTHONPATH=/app
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+--- /Users/danielkliewer/ITB02/backend/__init__.py ---
+
+
+--- /Users/danielkliewer/ITB02/backend/utils.py ---
+# utils.py
+import re
+from typing import List
+
+def extract_keywords(text: str) -> List[str]:
+    """
+    Extract key words from text using simple techniques
+    """
+    # Remove punctuation and convert to lowercase
+    text = re.sub(r'[^\w\s]', '', text.lower())
+    
+    # Split into words and remove common stop words
+    stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at'}
+    words = [word for word in text.split() if word not in stop_words]
+    
+    # Return top 5 most frequent words
+    word_freq = {}
+    for word in words:
+        word_freq[word] = word_freq.get(word, 0) + 1
+    
+    return sorted(word_freq, key=word_freq.get, reverse=True)[:5]
+
+--- /Users/danielkliewer/ITB02/backend/main.py ---
+from fastapi import FastAPI
+from backend.api.routers.story import router as story_router
+
+app = FastAPI()
+app.include_router(story_router, prefix="/story")
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
+--- /Users/danielkliewer/ITB02/backend/core/story_generation.py ---
+# story_generator.py
+import ollama
+from .rag_manager import NarrativeRAG
+from .utils import extract_keywords 
+
+from langchain.chains import LLMChain
+from langchain.prompts import PromptTemplate
+
+class StoryEngine:
+    def __init__(self):
+        self.llm = Ollama(model="gemma2:27b")
+        self.rag = NarrativeRAG()
+        
+    def generate_chapter(self, context):
+        retrieved = self.rag.retrieve_context(context["latest_summary"])
+        prompt = self._build_prompt(context, retrieved)
+        
+        chapter = self.llm.generate(prompt)
+        self._validate_chapter(chapter)
+        self._update_rag(chapter)
+        
+        return chapter
+
+    def _build_prompt(self, context, retrieved):
+        return f"""
+        Write a 300-word story chapter continuing from:
+        {context['summary']}
+        
+        Retrieved Context:
+        {retrieved}
+        
+        Requirements:
+        - Maintain {context['mood']} tone
+        - Advance conflicts: {', '.join(context['conflicts'])}
+        - End with a cliffhanger
+        """
+
+    def _validate_chapter(self, chapter):
+        # Custom validation logic
+        if len(chapter.split()) < 250:
+            raise ValueError("Chapter too short")
+            
+    def _update_rag(self, chapter):
+        self.rag.index_context(
+            document=chapter,
+            metadata={
+                "chapter": context["current_chapter"],
+                "keywords": extract_keywords(chapter)
+            }
+        )
+
+--- /Users/danielkliewer/ITB02/backend/core/image_analysis.py ---
+# image_analysis.py
+from pydantic import BaseModel
+import requests
+from PIL import Image
+import io
+import ollama
+import os
+import json
+
+class ImageAnalysis(BaseModel):
+    setting: str
+    characters: list[str]
+    mood: str
+    objects: list[str]
+    potential_conflicts: list[str]
+
+    @classmethod
+    def from_llava_response(cls, response):
+        return cls(
+            setting=response.get("setting_description", "Unknown setting"),
+            # Extract character descriptions from nested objects
+            characters=[item.get("description", "") 
+                      for item in response.get("characters", [])
+                      if isinstance(item, dict)],
+            # Flatten mood analysis structure
+            mood=response.get("mood_analysis", "Neutral").split(". ")[0],
+            # Extract object names from nested structure
+            objects=[item.get("object", "") 
+                   for item in response.get("significant_objects", [])
+                   if isinstance(item, dict)],
+            potential_conflicts=response.get("potential_conflicts", [])
+        )
+        
+
+class MultimodalAnalyzer:
+    def __init__(self, model="gemma2:27b"):
+        self.model = model
+        
+    def _load_image(self, image_source):
+        """Load image from file path or URL with validation"""
+        try:
+            if isinstance(image_source, str):
+                if image_source.startswith(('http://', 'https://')):
+                    response = requests.get(image_source, timeout=10)
+                    response.raise_for_status()
+                    if not response.headers.get('Content-Type', '').startswith('image/'):
+                        raise ValueError("URL does not point to an image")
+                    return response.content
+                else:
+                    if not os.path.exists(image_source):
+                        raise FileNotFoundError(f"Image file not found: {image_source}")
+                    with open(image_source, 'rb') as f:
+                        content = f.read()
+                        Image.open(io.BytesIO(content)).verify()  # Validate image format
+                        return content
+            elif isinstance(image_source, bytes):
+                Image.open(io.BytesIO(image_source)).verify()
+                return image_source
+            else:
+                raise ValueError("Invalid image source type")
+        except Exception as e:
+            print(f"Image Loading Error: {str(e)}")
+            raise
+    
+    
+    def analyze(self, image_source):
+        image_bytes = self._load_image(image_source)
+        if self.model == "gemma2:27b":
+            return self._analyze_with_llava(image_bytes)
+        else:
+            raise ValueError(f"Unsupported model: {self.model}")
+
+    def _analyze_with_llava(self, image_bytes):
+        try:
+            response = ollama.generate(
+                model="gemma2:27b",  # Use official LLaVA model instead of gemma2
+                prompt="""Analyze this image and return JSON with:
+            - setting description
+            - list of characters
+            - mood analysis
+            - list of significant objects
+            - potential conflicts""",
+                images=[image_bytes],  # Pass raw bytes directly
+                format="json",
+                stream=False
+        )
+# Validate response structure
+            if not response or 'response' not in response:
+                raise ValueError("Invalid response format from LLaVA")
+            
+            parsed = json.loads(response['response'])
+            return ImageAnalysis.from_llava_response(parsed)
+        
+        except Exception as e:
+        # Add error logging
+            print(f"LLaVA Error: {str(e)}")
+            if 'response' in locals():
+                print(f"Raw Response: {response.get('response', 'No response')}")
+            raise RuntimeError("Image analysis failed") from e
+
+
+
+--- /Users/danielkliewer/ITB02/backend/core/utils.py ---
+# utils.py
+import re
+from typing import List
+
+# Common English stop words to filter out
+stop_words = {'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'has', 'he', 'in', 'is', 'it',
+              'its', 'of', 'on', 'that', 'the', 'to', 'was', 'were', 'will', 'with'}
+
+def extract_keywords(text: str) -> List[str]:
+    # Add null check and ensure max 5 elements
+    words = [word for word in text.split() if word not in stop_words]
+    if not words:
+        return []
+        
+    word_freq = {}
+    for word in words:
+        word_freq[word] = word_freq.get(word, 0) + 1
+    
+    return sorted(word_freq, key=word_freq.get, reverse=True)[:5]
+
+def count_words(text):
+    return len([
+        word for word in re.findall(r'\b\w+\b', text)
+        if len(word) > 1 and not word.isnumeric()
+    ])
+
+--- /Users/danielkliewer/ITB02/backend/core/pipeline.py ---
+# pipeline.py
+from backend.core.image_analysis import MultimodalAnalyzer
+import ollama
+from backend.core.story_generator import StoryEngine  # Dot indicates same directory
+from backend.core.rag_manager import NarrativeRAG
+from transformers import pipeline
+
+
+class NarrativePipeline:
+    def __init__(self):
+        self.summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+
+    def _summarize_story(self, text, max_length=150):
+        summary = self.summarizer(
+            text,
+            max_length=max_length,
+            min_length=30,
+            do_sample=False,
+            truncation=True
+        )
+        return summary[0]['summary_text']
+
+    
+    def run(self, image_path):
+        try:
+            # Step 1: Image Analysis
+            analyzer = MultimodalAnalyzer()
+            analysis = analyzer.analyze(image_path)
+            
+            # Step 2: Initialize RAG
+            rag = NarrativeRAG()
+            rag.index_context(
+                document=analysis.json(),
+                metadata={"type": "initial_analysis"}
+            )
+
+            # Step 3: Generate Story
+            story = []
+            summary = "Initial story setup"
+            for chapter_num in range(1, 6):
+                context = {
+                    "current_chapter": chapter_num,
+                    "summary": summary,  # This is the correct key
+                    "mood": analysis.mood,
+                    "conflicts": analysis.potential_conflicts
+                }
+                
+                chapter = StoryEngine().generate_chapter(context)
+                story.append(chapter)
+                
+                # Update summary every 3 chapters instead of 5
+                if chapter_num % 3 == 0:
+                    summary = self._summarize_story(story[-3:])
+                chapter = generate_chapter_with_retry(StoryEngine(), context)
+  
+            return story
+            # In NarrativePipeline.run()
+        except Exception as error:
+            # Add logging for diagnostics
+            print(f"Pipeline Error: {str(error)}")
+            print(f"Error Type: {type(error).__name__}")
+            raise RuntimeError(f"Pipeline failed: {str(error)}") from error
+        
+        
+        
+def _summarize_story(self, chapters):
+        try:
+            summary_prompt = "Summarize this story arc in 3 sentences:"
+            return ollama.generate(
+                model="gemma2:27b",
+                prompt=summary_prompt + "\n".join(chapters),
+                stream=False
+            )
+        except Exception as error:
+            print(f"Summarization failed: {str(error)}")
+            return "Summary unavailable"
+        
+        
+def generate_chapter_with_retry(engine, context, retries=3):
+    for attempt in range(retries):
+        try:
+            chapter = engine.generate_chapter(context)
+            return chapter
+        except ValueError as e:
+            if "too short" in str(e) and attempt < retries-1:
+                context["summary"] += "\n[Previous attempt was too short]"
+                continue
+            raise
+    return None
+
+
+
+--- /Users/danielkliewer/ITB02/backend/core/rag_manager.py ---
+# rag_manager.py
+import uuid
+import json
+
+import chromadb
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+class NarrativeRAG:
+    def __init__(self):
+        self.client = chromadb.PersistentClient(path="./chroma_db")
+        self.collection = self.client.get_or_create_collection("narrative")
+        self.text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=500,
+            chunk_overlap=50
+        )
+
+    def index_context(self, document: dict, metadata: dict):
+        # Validate metadata types before adding
+        validated_metadata = {}
+        for key, value in metadata.items():
+            if isinstance(value, (list, dict)):
+                # Convert complex types to strings
+                validated_metadata[key] = str(value)
+            else:
+                validated_metadata[key] = value
+                
+        chunks = self.text_splitter.split_text(document)
+        ids = [str(uuid.uuid4()) for _ in chunks]
+        self.collection.add(
+            documents=chunks,
+            metadatas=[validated_metadata]*len(chunks),  # Use validated metadata
+            ids=ids
+        )
+
+    def retrieve_context(self, query, k=3):
+        results = self.collection.query(
+            query_texts=[query],
+            n_results=k
+        )
+        return [doc for doc in results['documents'][0]]
+
+--- /Users/danielkliewer/ITB02/backend/core/story_generator.py ---
+# story_generator.py
+from langchain_community.llms import Ollama
+from .rag_manager import NarrativeRAG
+from .utils import extract_keywords 
+from langchain_ollama import OllamaLLM  # Replace old import
+
+
+from langchain.chains import LLMChain
+from langchain.prompts import PromptTemplate
+
+class StoryEngine:
+    def __init__(self):
+        self.llm = OllamaLLM(model="gemma2:27b")  # Updated class name
+        self.rag = NarrativeRAG()
+        
+    def generate_chapter(self, context):
+        # Change from 'latest_summary' to 'summary'
+        retrieved = self.rag.retrieve_context(context["summary"])  # Fixed key name
+        
+        prompt = self._build_prompt(context, retrieved)
+        chapter = self.llm.invoke(prompt)  # Updated generation method
+        self._validate_chapter(chapter)
+        self._update_rag(chapter, context)  # Pass context to update
+        
+        return chapter
+
+    def _update_rag(self, chapter, context):
+        keywords = extract_keywords(chapter)
+        # Convert list to comma-separated string
+        keyword_str = ", ".join(keywords) if keywords else "none"
+    
+        self.rag.index_context(
+            document=chapter,
+            metadata={
+                "chapter": str(context["current_chapter"]),  # Ensure string type
+                "keywords": keyword_str  # Now a string instead of list
+        }
+    )
+
+    def _build_prompt(self, context, retrieved):
+        return f"""
+    Write a detailed story chapter of at least 300 words continuing from:
+    {context['summary']}
+    
+    Retrieved Context:
+    {retrieved}
+    
+    Requirements (STRICTLY FOLLOW):
+    - Maintain {context['mood']} tone
+    - Develop conflicts: {', '.join(context['conflicts'])}
+    - End with a suspenseful cliffhanger
+    - Minimum 300 words (VERY IMPORTANT)
+    - Use descriptive language
+    - Focus on character actions and dialogue
+    
+    Formatting Rules:
+    - No markdown
+    - Paragraphs separated by newlines
+    - Direct speech in quotes
+    
+    Failure to meet word count will result in chapter rejection!
+    """
+
+    def _validate_chapter(self, chapter):
+        words = chapter.split()
+        if len(words) < 275:  # Give 25-word buffer
+        # Attempt to expand the content instead of failing
+            expanded = self.llm.invoke(f"Expand this chapter to 300 words: {chapter}")
+            if len(expanded.split()) < 250:
+                raise ValueError("Chapter too short after expansion")
+            return expanded
+        return chapter
+
+--- /Users/danielkliewer/ITB02/backend/core/__pycache__/pipeline.cpython-313.pyc ---
+--- /Users/danielkliewer/ITB02/backend/core/__pycache__/pipeline.cpython-313.pyc (ERROR: 'utf-8' codec can't decode byte 0xf3 in position 0: invalid continuation byte) ---
+
+--- /Users/danielkliewer/ITB02/backend/core/__pycache__/rag_manager.cpython-313.pyc ---
+--- /Users/danielkliewer/ITB02/backend/core/__pycache__/rag_manager.cpython-313.pyc (ERROR: 'utf-8' codec can't decode byte 0xf3 in position 0: invalid continuation byte) ---
+
+--- /Users/danielkliewer/ITB02/backend/core/__pycache__/utils.cpython-313.pyc ---
+--- /Users/danielkliewer/ITB02/backend/core/__pycache__/utils.cpython-313.pyc (ERROR: 'utf-8' codec can't decode byte 0xf3 in position 0: invalid continuation byte) ---
+
+--- /Users/danielkliewer/ITB02/backend/core/__pycache__/image_analysis.cpython-313.pyc ---
+--- /Users/danielkliewer/ITB02/backend/core/__pycache__/image_analysis.cpython-313.pyc (ERROR: 'utf-8' codec can't decode byte 0xf3 in position 0: invalid continuation byte) ---
+
+--- /Users/danielkliewer/ITB02/backend/core/__pycache__/story_generator.cpython-313.pyc ---
+--- /Users/danielkliewer/ITB02/backend/core/__pycache__/story_generator.cpython-313.pyc (ERROR: 'utf-8' codec can't decode byte 0xf3 in position 0: invalid continuation byte) ---
+
+--- /Users/danielkliewer/ITB02/backend/__pycache__/main.cpython-313.pyc ---
+--- /Users/danielkliewer/ITB02/backend/__pycache__/main.cpython-313.pyc (ERROR: 'utf-8' codec can't decode byte 0xf3 in position 0: invalid continuation byte) ---
+
+--- /Users/danielkliewer/ITB02/backend/__pycache__/__init__.cpython-313.pyc ---
+--- /Users/danielkliewer/ITB02/backend/__pycache__/__init__.cpython-313.pyc (ERROR: 'utf-8' codec can't decode byte 0xf3 in position 0: invalid continuation byte) ---
+
+--- /Users/danielkliewer/ITB02/backend/api/__init__.py ---
+
+
+--- /Users/danielkliewer/ITB02/backend/api/routers/story.py ---
+import os
+import json
+import tempfile
+import io
+from fastapi import APIRouter, File, UploadFile, HTTPException
+from backend.core.pipeline import NarrativePipeline
+from PIL import Image
+allowed_formats = {'JPEG', 'PNG'}  # PIL uses uppercase format names
+
+
+router = APIRouter()
+@router.post("/generate-story")
+async def generate_story(image: UploadFile = File(...)):
+    temp_file_path = None
+    file_ext = ".tmp"  # Default fallback extension
+    try:
+        # Validate MIME type
+        if not image.content_type.startswith('image/'):
+            raise HTTPException(400, "Invalid file type. Must be an image")
+
+        # Read and validate content
+        content = await image.read()
+        if len(content) < 1024:
+            raise HTTPException(400, "File too small (minimum 1KB)")
+        if len(content) > 10_000_000:
+            raise HTTPException(400, "File too large (maximum 10MB)")
+
+        # Verify image content and get format
+        allowed_formats = {'JPEG', 'PNG'}
+        with Image.open(io.BytesIO(content)) as img:
+            img.verify()
+            if img.format not in allowed_formats:
+                raise HTTPException(400, "Unsupported format. Use JPEG/PNG")
+            file_ext = f".{img.format.lower()}"  # Now properly defined
+
+        # Create temp file with validated extension
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp_file:
+            tmp_file.write(content)
+            temp_file_path = tmp_file.name
+
+        # Process pipeline
+        pipeline = NarrativePipeline()
+        story = pipeline.run(temp_file_path)
+        return {"story": story}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Processing error: {str(e)}")
+    finally:
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+
+--- /Users/danielkliewer/ITB02/backend/api/routers/__init__.py ---
+
+
+--- /Users/danielkliewer/ITB02/backend/api/routers/__pycache__/story.cpython-313.pyc ---
+--- /Users/danielkliewer/ITB02/backend/api/routers/__pycache__/story.cpython-313.pyc (ERROR: 'utf-8' codec can't decode byte 0xf3 in position 0: invalid continuation byte) ---
+
+--- /Users/danielkliewer/ITB02/backend/api/routers/__pycache__/__init__.cpython-313.pyc ---
+--- /Users/danielkliewer/ITB02/backend/api/routers/__pycache__/__init__.cpython-313.pyc (ERROR: 'utf-8' codec can't decode byte 0xf3 in position 0: invalid continuation byte) ---
+
+--- /Users/danielkliewer/ITB02/backend/api/__pycache__/__init__.cpython-313.pyc ---
+--- /Users/danielkliewer/ITB02/backend/api/__pycache__/__init__.cpython-313.pyc (ERROR: 'utf-8' codec can't decode byte 0xf3 in position 0: invalid continuation byte) ---
+

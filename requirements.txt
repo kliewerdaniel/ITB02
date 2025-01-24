@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+ollama
+chromadb
+langchain
+pydantic
+pillow
+requests
+react
+python-multipart
+celery
+redis
+langchain-community
+langchain-ollama
+textstat
+transformers
