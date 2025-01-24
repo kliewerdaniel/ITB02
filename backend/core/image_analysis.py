@@ -73,28 +73,24 @@ class MultimodalAnalyzer:
     def _analyze_with_llava(self, image_bytes):
         try:
             response = ollama.generate(
-                model="gemma2:27b",  # Use official LLaVA model instead of gemma2
+                model="llava",
                 prompt="""Analyze this image and return JSON with:
-            - setting description
-            - list of characters
-            - mood analysis
-            - list of significant objects
-            - potential conflicts""",
-                images=[image_bytes],  # Pass raw bytes directly
+                    - setting_description (string)
+                    - characters (array of {type: string, description: string})
+                    - mood_analysis (string)
+                    - significant_objects (array of {object: string, description: string})
+                    - potential_conflicts (array of strings)""",
+                images=[image_bytes],
                 format="json",
                 stream=False
-        )
-# Validate response structure
-            if not response or 'response' not in response:
-                raise ValueError("Invalid response format from LLaVA")
-            
-            parsed = json.loads(response['response'])
-            return ImageAnalysis.from_llava_response(parsed)
-        
-        except Exception as e:
-        # Add error logging
-            print(f"LLaVA Error: {str(e)}")
-            if 'response' in locals():
-                print(f"Raw Response: {response.get('response', 'No response')}")
-            raise RuntimeError("Image analysis failed") from e
+            )
 
+            parsed = json.loads(response['response'])
+            print(f"Raw Parsed Data: {parsed}")  # For debugging
+            
+            return ImageAnalysis.from_llava_response(parsed)
+            
+        except Exception as e:
+            print(f"Full Error Context: {str(e)}")
+            print(f"Raw LLaVA Response: {response.get('response', 'No response')}")
+            raise RuntimeError(f"Image analysis failed: {str(e)}") from e
